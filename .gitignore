@@ -1,0 +1,24 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+*.pkl
+# Optional: Include pkl if you want to ship the model
+!squat.pkl
+# Include the task model
+!pose_landmarker_lite.task
+# Exclude CSV dataset if it's too big
+squat_coords_merged.csv
