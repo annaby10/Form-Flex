@@ -100,13 +100,18 @@ class PoseDetector:
 
     # ── Landmark pixel positions ────────────────────────────────────────────
     def findPosition(self, img):
-        """Populate self.lmList with pixel coords for all 33 landmarks."""
+        """Populate self.lmList with pixel coords for all 33 landmarks, plus 3D world coords."""
         self.lmList = []
-        if self.results and self.results.pose_landmarks:
+        self.worldList = []
+        if self.results and self.results.pose_landmarks and self.results.pose_world_landmarks:
             h, w, _ = img.shape
+            # Parse 2D pixel landmarks
             for idx, lm in enumerate(self.results.pose_landmarks[0]):
                 cx, cy = int(lm.x * w), int(lm.y * h)
                 self.lmList.append([idx, cx, cy])
+            # Parse 3D true world coordinates (meters)
+            for idx, wlm in enumerate(self.results.pose_world_landmarks[0]):
+                self.worldList.append([idx, wlm.x, wlm.y, wlm.z])
         return self.lmList
 
     # ── Full 33-point skeleton drawing ─────────────────────────────────────
@@ -129,29 +134,37 @@ class PoseDetector:
 
         return img
 
-    # ── Angle calculation (atan2, returns interior 0–180°) ─────────────────
+    # ── Angle calculation (True 3D dot product, robust to camera angle) ────
     def findAngle(self, img, p1, p2, p3, draw=True, label=""):
         """
-        Calculates angle at vertex p2 between rays p2→p1 and p2→p3.
-        Optionally draws the angle arc and label on img.
-        Returns the angle in degrees (0–180).
+        Calculates 3D interior angle at vertex p2 between rays p2→p1 and p2→p3
+        using MediaPipe pose_world_landmarks. This provides reliable kinematics 
+        from ANY video angle (front, side, isometric).
         """
-        if len(self.lmList) <= max(p1, p2, p3):
+        if not hasattr(self, 'worldList') or len(self.worldList) <= max(p1, p2, p3):
             return 0.0
 
-        x1, y1 = self.lmList[p1][1:]
-        x2, y2 = self.lmList[p2][1:]
-        x3, y3 = self.lmList[p3][1:]
+        # Get 3D real-world coordinates
+        v1 = np.array(self.worldList[p1][1:4])
+        v2 = np.array(self.worldList[p2][1:4])
+        v3 = np.array(self.worldList[p3][1:4])
 
-        angle = math.degrees(
-            math.atan2(y3 - y2, x3 - x2) - math.atan2(y1 - y2, x1 - x2)
-        )
-        if angle < 0:
-            angle += 360
-        angle = min(angle, 360 - angle)   # ensure interior angle
-
-        if draw:
-            # Draw the two limb segments
+        # Vectors BA and BC
+        ba = v1 - v2
+        bc = v3 - v2
+        
+        # Cosine rule / Dot product
+        cosine_angle = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc) + 1e-6)
+        angle = np.degrees(np.arccos(np.clip(cosine_angle, -1.0, 1.0)))
+        
+        # Map to specific anatomical bends to simulate 2D flexion/extension logic where needed
+        # (Standard 3D angle is always 0-180 absolute spatial angle)
+        
+        if draw and self.lmList:
+            x1, y1 = self.lmList[p1][1:]
+            x2, y2 = self.lmList[p2][1:]
+            x3, y3 = self.lmList[p3][1:]
+            # Draw the two limb segments on screen
             cv2.line(img, (x1, y1), (x2, y2), (200, 200, 0), 2, cv2.LINE_AA)
             cv2.line(img, (x3, y3), (x2, y2), (200, 200, 0), 2, cv2.LINE_AA)
             # Vertex dot
@@ -161,7 +174,8 @@ class PoseDetector:
             text = f"{label}{int(angle)}°" if label else f"{int(angle)}°"
             cv2.putText(img, text, (x2 + 10, y2 - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 0), 2, cv2.LINE_AA)
-        return angle
+        
+        return float(angle)
 
     # ── Raw feature vector for ML model ─────────────────────────────────────
     def get_raw_landmarks_features(self):

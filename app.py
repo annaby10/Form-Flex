@@ -18,6 +18,7 @@ import time
 import pickle
 
 from pose_estimation_module import PoseDetector
+from yolo_module import YoloDetector
 import audio_feedback as audio
 
 # ──────────────────────────────────────────────────────────────────
@@ -170,7 +171,13 @@ MATH_RULES = {
 def get_detector():
     return PoseDetector(detectionCon=0.65, trackCon=0.65)
 
+@st.cache_resource
+def get_yolo():
+    # Only loads the model once and keeps it in memory
+    return YoloDetector()
+
 detector = get_detector()
+yolo = get_yolo()
 
 # ──────────────────────────────────────────────────────────────────
 # 11 JOINT ANGLES SPEC
@@ -197,31 +204,34 @@ JOINT_ANGLES = [
 # ──────────────────────────────────────────────────────────────────
 def process_frame(img: np.ndarray, state: dict) -> tuple:
     """
-    Runs full analysis pipeline on one frame.
+    Runs full analysis pipeline on one frame: YOLOv5 isolation → MediaPipe 3D → ML.
     Returns (annotated_img, angles_dict, rule_key)
     """
     img = cv2.resize(img, (720, 540))
 
-    # 1 — Pose detection
-    detector.findPose(img)
-    lmList = detector.findPosition(img)
+    # 1 — YOLOv5 detection & segmentation (Fulfills SDD Component 2)
+    isolated_img, visual_img, person_detected = yolo.detect_and_isolate(img)
+
+    # 2 — Pose detection on ISOLATED image (MediaPipe)
+    detector.findPose(isolated_img)
+    lmList = detector.findPosition(isolated_img)
 
     # Default outputs
     angles = {}
     rule_key = "standing"
 
-    if len(lmList) < 29:   # need at minimum hip→ankle landmarks
-        # Draw a "no person detected" overlay
-        cv2.putText(img, "No person detected — Stand in frame", (30, 270),
+    # Require minimum joint visibility
+    if not person_detected or len(lmList) < 29:
+        cv2.putText(visual_img, "No person detected — Stand in frame", (30, 270),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2, cv2.LINE_AA)
-        return img, angles, rule_key
+        return visual_img, angles, rule_key
 
-    # 2 — Draw full 33-point skeleton
-    detector.drawSkeleton(img, line_thickness=2)
+    # 3 — Draw full 33-point skeleton back onto visual_img
+    detector.drawSkeleton(visual_img, line_thickness=2)
 
-    # 3 — Calculate all 11 joint angles
+    # 4 — Calculate all 11 real 3D joint angles (Fulfills SDD Component 4 & 5)
     for (name, p1, p2, p3, draw) in JOINT_ANGLES:
-        a = detector.findAngle(img, p1, p2, p3, draw=draw, label="")
+        a = detector.findAngle(visual_img, p1, p2, p3, draw=draw, label="")
         angles[name] = round(a, 1)
 
     r_knee = angles.get("R Knee", 0)
@@ -271,10 +281,10 @@ def process_frame(img: np.ndarray, state: dict) -> tuple:
     else:
         rule_key = "coming_up"    # heading back up
 
-    # 8 — Draw HUD overlays on frame
-    _draw_hud(img, state, depth_pct, bar_y, rule_key, r_knee, hip_angle)
+    # 9 — Draw HUD overlays on frame
+    _draw_hud(visual_img, state, depth_pct, bar_y, rule_key, r_knee, hip_angle)
 
-    return img, angles, rule_key
+    return visual_img, angles, rule_key
 
 
 def _draw_hud(img, state, depth_pct, bar_y, rule_key, knee_angle, hip_angle):
