@@ -242,11 +242,11 @@ def process_frame(img: np.ndarray, state: dict) -> tuple:
     bar_y = int(np.interp(r_knee, (70, 160), (480, 200)))
 
     # 5 — Rep counting
-    # Thresholds: 80% = squat bottom reached, 20% = returned to standing
+    # Thresholds: 70% = squat bottom reached, 30% = returned to standing
     # These are deliberately loose so normal squatting depth always triggers counting
-    if depth_pct >= 80 and state["dir"] == 0:
+    if depth_pct >= 70 and state["dir"] == 0:
         state["dir"] = 1        # mark as descended
-    if depth_pct <= 20 and state["dir"] == 1:
+    if depth_pct <= 30 and state["dir"] == 1:
         state["count"] += 1     # count full rep when they stand back up
         state["dir"] = 0
         audio.play("rep")
@@ -271,10 +271,10 @@ def process_frame(img: np.ndarray, state: dict) -> tuple:
     elif r_knee < 50:
         rule_key = "too_deep"
         audio.play("warning")
-    elif depth_pct >= 80:
+    elif depth_pct >= 70:
         rule_key = "perfect_depth"
         audio.play("good")
-    elif depth_pct <= 20:
+    elif depth_pct <= 30:
         rule_key = "standing"
     elif state["dir"] == 0:
         rule_key = "going_down"   # heading toward squat bottom
@@ -374,22 +374,28 @@ def main():
 
     source = sidebar_ui()
 
-    col_vid, col_stats = st.columns([3, 1])
+    # ── UPPER METRICS PANEL
+    kpi_cols = st.columns(4)
+    with kpi_cols[0]: kpi_reps = st.empty()
+    with kpi_cols[1]: kpi_knee = st.empty()
+    with kpi_cols[2]: kpi_hip = st.empty()
+    with kpi_cols[3]: kpi_depth = st.empty()
+
+    # ── UPPER FEEDBACK PANEL
+    st.markdown("#### 🗒 Real-Time Feedback")
+    col_fb, col_tip = st.columns([1, 2])
+    with col_fb: feedback_box = st.empty()
+    with col_tip: tip_box = st.empty()
+    
+    st.markdown("---")
+
+    # ── LOWER VIDEO & RAW ANGLES
+    col_vid, col_angles = st.columns([3, 1])
 
     with col_vid:
         stframe = st.empty()
 
-    with col_stats:
-        st.markdown("#### 📊 Live Stats")
-        kpi_reps    = st.empty()
-        kpi_knee    = st.empty()
-        kpi_hip     = st.empty()
-        kpi_depth   = st.empty()
-        st.markdown("---")
-        st.markdown("#### 🗒 Feedback")
-        feedback_box = st.empty()
-        tip_box      = st.empty()
-        st.markdown("---")
+    with col_angles:
         st.markdown("#### 📐 Joint Angles")
         angle_table  = st.empty()
 
